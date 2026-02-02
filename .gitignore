@@ -11,3 +11,4 @@ wheels/
 .venv
 browser_profile
 *.json
+*.pdf

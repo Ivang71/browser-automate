@@ -22,12 +22,13 @@ def get_llm():
     provider = os.getenv("LLM_PROVIDER", "openai").lower()
     if provider == "deepseek":
         return ChatDeepSeek(
-            model="deepseek-chat",
+            model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
             api_key=os.getenv("DEEPSEEK_API_KEY"),
         )
     if provider in ("browser_use", "browser-use", "browseruse"):
         return ChatBrowserUse()
-    return ChatOpenAI(model="gpt-5-nano")
+    model = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+    return ChatOpenAI(model=model)
 
 
 def get_browser():
@@ -79,15 +80,20 @@ TOKENS_PROMPT = (
 def get_task(mode: str):
     if mode == "tokens":
         return TOKENS_PROMPT
-    instructions = (BASE_DIR / "instructions.txt").read_text(encoding="utf-8")
-    resume_path = BASE_DIR / "instructions.json"
-    resume_text = ""
-    if resume_path.exists():
-        resume = json.loads(resume_path.read_text(encoding="utf-8"))
-        resume_text = "\n\nHere is the candidate profile data in JSON format:\n" + json.dumps(
-            resume, ensure_ascii=False
+    instructions_path = BASE_DIR / "instructions.txt"
+    instructions = (
+        ("\n\n" + instructions_path.read_text(encoding="utf-8").strip() + "\n\n")
+        if instructions_path.exists()
+        else ""
+    )
+    profile_path = BASE_DIR / "instructions.json"
+    profile_text = ""
+    if profile_path.exists():
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        profile_text = "\n\nHere is the candidate profile data in JSON format:\n" + json.dumps(
+            profile, ensure_ascii=False
         )
-    return PROMPT_PREFIX + resume_text
+    return PROMPT_PREFIX + instructions + profile_text
 
 
 async def run_agent(mode: str):
@@ -105,27 +111,35 @@ async def run_agent(mode: str):
 
 
 async def main(mode: str):
-    keys_env = os.getenv("BROWSER_USE_API_KEYS")
-    keys = [k.strip() for k in keys_env.split(",") if k.strip()]
-    single_key = os.getenv("BROWSER_USE_API_KEY")
-    if not keys and single_key:
-        keys = [single_key]
-    if not keys:
-        raise RuntimeError("No BROWSER_USE_API_KEYS or BROWSER_USE_API_KEY set")
-    i = 0
-    while True:
-        os.environ["BROWSER_USE_API_KEY"] = keys[i]
-        try:
-            history = await run_agent(mode)
-            if "insufficient credits" in str(history).lower():
-                i = (i + 1) % len(keys)
-                continue
-        except Exception as e:
-            msg = str(e).lower()
-            if "insufficient credits" in msg:
-                i = (i + 1) % len(keys)
-                continue
-            raise
+    provider = os.getenv("LLM_PROVIDER", "openai").lower()
+    if provider in ("browser_use", "browser-use", "browseruse"):
+        keys_env = os.getenv("BROWSER_USE_API_KEYS")
+        keys = [
+            k.strip()
+            for k in (keys_env.split(",") if keys_env else [])
+            if k.strip()
+        ]
+        single_key = os.getenv("BROWSER_USE_API_KEY")
+        if not keys and single_key:
+            keys = [single_key]
+        if not keys:
+            raise RuntimeError("No BROWSER_USE_API_KEYS or BROWSER_USE_API_KEY set")
+        i = 0
+        while True:
+            os.environ["BROWSER_USE_API_KEY"] = keys[i]
+            try:
+                history = await run_agent(mode)
+                if "insufficient credits" in str(history).lower():
+                    i = (i + 1) % len(keys)
+                    continue
+            except Exception as e:
+                msg = str(e).lower()
+                if "insufficient credits" in msg:
+                    i = (i + 1) % len(keys)
+                    continue
+                raise
+    else:
+        await run_agent(mode)
 
 
 if __name__ == "__main__":
